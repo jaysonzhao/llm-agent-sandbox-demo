@@ -1,0 +1,43 @@
+apiVersion: extensions.agents.x-k8s.io/v1beta1
+kind: SandboxTemplate
+metadata:
+  name: code-execution-template
+  namespace: llm-sandbox-demo
+spec:
+  podTemplate:
+    metadata:
+      labels:
+        app: code-sandbox
+    spec:
+      runtimeClassName: kata-remote
+      containers:
+        - name: sandbox
+          image: docker.io/python:3.11-slim
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              pip install --quiet numpy pandas requests matplotlib scipy sympy 2>/dev/null
+              sleep infinity
+          ports:
+            - containerPort: 8888
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+  volumeClaimTemplates:
+    - metadata:
+        name: workspace
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
+  networkPolicyManagement: Managed
+  envVarsInjectionPolicy: Allowed
