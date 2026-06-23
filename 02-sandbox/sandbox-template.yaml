@@ -12,12 +12,7 @@ spec:
       runtimeClassName: kata-remote
       containers:
         - name: sandbox
-          image: docker.io/python:3.11-slim
-          command: ["/bin/sh", "-c"]
-          args:
-            - |
-              pip install --quiet numpy pandas requests matplotlib scipy sympy 2>/dev/null
-              sleep infinity
+          image: quay.io/eesposit/python-runtime-sandbox:latest
           ports:
             - containerPort: 8888
               protocol: TCP
@@ -28,16 +23,6 @@ spec:
             limits:
               cpu: "2"
               memory: 2Gi
-          volumeMounts:
-            - name: workspace
-              mountPath: /workspace
-  volumeClaimTemplates:
-    - metadata:
-        name: workspace
-      spec:
-        accessModes: ["ReadWriteOnce"]
-        resources:
-          requests:
-            storage: 1Gi
+  service: true
   networkPolicyManagement: Managed
   envVarsInjectionPolicy: Allowed

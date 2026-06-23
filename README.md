@@ -1,18 +1,18 @@
 # LLM Agent Sandbox Demo
 
-An end-to-end demo on OpenShift that lets you chat with an LLM through Open WebUI. When you ask it to write code, it automatically executes that code in isolated sandbox pods running on the `kata-remote` runtime via the [Agent Sandbox Operator](https://github.com/openshift/kubernetes-sigs-agent-sandbox).
+An end-to-end demo on OpenShift that lets you chat with Claude through a custom chat UI. When you ask it to write code, you can execute it in isolated sandbox pods running on the `kata-remote` runtime via the [Agent Sandbox Operator](https://github.com/openshift/kubernetes-sigs-agent-sandbox).
 
 ## Architecture
 
 ```
 ┌─────────────┐     ┌──────────────────┐     ┌──────────────────┐
-│  Open WebUI │────▶│  Agent Backend   │────▶│  vLLM (Granite)  │
-│  (Browser)  │◀────│  (FastAPI proxy) │◀────│  OpenShift AI    │
-└─────────────┘     └───────┬──────────┘     └──────────────────┘
-                            │
-                   execute_code tool call
-                            │
-                    ┌───────▼──────────┐
+│   Chat UI   │────▶│  Agent Backend   │────▶│  Claude Sonnet 4 │
+│  (Browser)  │◀────│  (FastAPI proxy) │◀────│  (Vertex AI)     │
+└──────┬──────┘     └───────┬──────────┘     └──────────────────┘
+       │                    │
+  click "Run"          execute code
+       │                    │
+       └───────────▶┌───────▼──────────┐
                     │  Sandbox Claim   │
                     │  (kata-remote)   │
                     │                  │
@@ -23,33 +23,35 @@ An end-to-end demo on OpenShift that lets you chat with an LLM through Open WebU
 ```
 
 **Flow:**
-1. User chats in Open WebUI
-2. Messages go to the Agent Backend (OpenAI-compatible API proxy)
-3. Agent Backend forwards to vLLM with an `execute_code` tool definition
-4. When the LLM generates code and calls the tool, the Agent Backend:
+1. User chats in the Chat UI
+2. Messages stream to the Agent Backend (OpenAI-compatible API proxy)
+3. Agent Backend converts messages to the Anthropic Messages API and calls Claude via Vertex AI `rawPredict`
+4. Claude responds with code in fenced markdown blocks
+5. The Chat UI renders code blocks with syntax highlighting and a **Run** button
+6. Clicking Run sends the code to `/v1/sandbox/execute`, which:
    - Claims a pre-warmed sandbox pod from the warm pool
+   - Auto-installs any missing Python packages
    - Writes and runs the code inside the sandbox
-   - Returns stdout/stderr back to the LLM
-5. The LLM incorporates the execution results and responds to the user
+   - Returns stdout/stderr back to the UI
 
 ## Components
 
 | Component | Description |
 |-----------|-------------|
-| **OpenShift AI** | Operator that provides model serving via KServe + vLLM |
-| **vLLM + Granite 3.1 2B** | Code-capable LLM with tool-calling support, CPU-only, pulled from HuggingFace |
-| **Agent Backend** | Python FastAPI service that proxies chat requests and handles sandbox code execution |
+| **Claude Sonnet 4** | Anthropic's model accessed via Google Vertex AI `rawPredict` endpoint |
+| **Agent Backend** | Python FastAPI service that proxies OpenAI-format chat requests to Anthropic's API and handles sandbox code execution |
 | **Agent Sandbox Operator** | Creates and manages isolated sandbox pods (pre-installed) |
 | **Warm Pool** | 2 pre-warmed `kata-remote` pods ready for instant code execution |
-| **Open WebUI** | ChatGPT-like web interface exposed via OpenShift Route |
+| **Chat UI** | Lightweight single-page chat app (nginx + HTML) with streaming, syntax highlighting, and Run buttons on code blocks |
 
 ## Prerequisites
 
-- OpenShift 4.14+ cluster (no GPU required — runs on CPU)
+- OpenShift 4.14+ cluster (no GPU required)
 - `oc` CLI logged into the cluster as cluster-admin
 - Red Hat Build of Agent Sandbox Operator already installed
 - `kata-remote` RuntimeClass available (via OpenShift Sandboxed Containers operator with peer pods)
-- HuggingFace model access (Granite 3.1 2B Instruct is open-weight)
+- GCP project with Anthropic models enabled on Vertex AI
+- GCP application default credentials (`gcloud auth application-default login`)
 
 ## Deploy
 
@@ -58,59 +60,69 @@ An end-to-end demo on OpenShift that lets you chat with an LLM through Open WebU
 ```
 
 The script will:
-1. Install the OpenShift AI operator and create a DataScienceCluster
-2. Deploy a vLLM serving runtime with Granite 3.1 2B Instruct (CPU-only)
-3. Create a SandboxTemplate (kata-remote) and WarmPool (2 replicas)
-4. Build and deploy the Agent Backend
-5. Deploy Open WebUI with an OpenShift Route
+1. Create the namespace and a Kubernetes secret from your GCP credentials
+2. Create a SandboxTemplate (kata-remote) and WarmPool (2 replicas)
+3. Deploy the Agent Backend (pre-built image from `quay.io/eesposit/agent-backend`)
+4. Deploy the Chat UI with an OpenShift Route
+5. Wait for the sandbox warm pool to be ready
+
+### GCP Credentials
+
+The deploy script looks for credentials at `$GCP_CREDENTIALS_FILE`, falling back to `~/.config/gcloud/application_default_credentials.json`. To set up:
+
+```bash
+gcloud auth application-default login
+# or
+export GCP_CREDENTIALS_FILE=/path/to/your/credentials.json
+```
+
+The credentials are stored as a Kubernetes secret (`gcp-credentials`) and mounted into the agent-backend pod. They are **not** stored in this repository (blocked by `.gitignore`).
 
 ## Manual Deployment
 
 If you prefer to deploy step-by-step:
 
 ```bash
-# 1. OpenShift AI
-oc apply -f 01-openshift-ai/namespace.yaml
-oc create namespace redhat-ods-operator --dry-run=client -o yaml | oc apply -f -
-oc apply -f 01-openshift-ai/operator-group.yaml
-oc apply -f 01-openshift-ai/subscription.yaml
-# Wait for operator CSV to succeed, then:
-oc apply -f 01-openshift-ai/dsc.yaml
+# 1. Namespace & GCP credentials
+oc create namespace llm-sandbox-demo
+oc create secret generic gcp-credentials \
+  --from-file=application_default_credentials.json=$HOME/.config/gcloud/application_default_credentials.json \
+  -n llm-sandbox-demo
 
-# 2. Model Server
-oc apply -f 02-model-server/serving-runtime.yaml
-oc apply -f 02-model-server/inference-service.yaml
+# 2. Sandbox Warm Pool
+oc apply -f 02-sandbox/sandbox-template.yaml
+oc apply -f 02-sandbox/warm-pool.yaml
 
-# 3. Sandbox Warm Pool
-oc apply -f 03-sandbox/sandbox-template.yaml
-oc apply -f 03-sandbox/warm-pool.yaml
+# 3. Agent Backend
+oc apply -f 03-agent-backend/deployment.yaml
 
-# 4. Agent Backend (build image first)
-oc new-build --name=agent-backend --binary --strategy=docker \
-  --to=agent-backend:latest -n llm-sandbox-demo
-oc start-build agent-backend --from-dir=04-agent-backend -n llm-sandbox-demo --follow
-# Update image ref in deployment.yaml, then:
-oc apply -f 04-agent-backend/deployment.yaml
-
-# 5. Open WebUI
-oc apply -f 05-open-webui/deployment.yaml
+# 4. Chat UI
+oc create configmap chat-ui-files \
+  --from-file=index.html=04-chat-ui/index.html \
+  --from-file=nginx.conf=04-chat-ui/nginx.conf \
+  -n llm-sandbox-demo --dry-run=client -o yaml | oc apply -f -
+oc apply -f 04-chat-ui/deployment.yaml
 ```
 
 ## Configuration
 
 ### Changing the Model
 
-Edit `02-model-server/inference-service.yaml` and update `storageUri`:
+Edit `03-agent-backend/deployment.yaml` and update the environment variables:
 
 ```yaml
-storageUri: hf://mistralai/Mistral-7B-Instruct-v0.3
+env:
+  - name: MODEL_NAME
+    value: "claude-sonnet-4@20250514"  # change to another Anthropic model
+  - name: VERTEX_REGION
+    value: "us-east5"                   # must support rawPredict
+  - name: VERTEX_PROJECT
+    value: "your-gcp-project"
 ```
-
-Then update `VLLM_BASE_URL` and `MODEL_NAME` in `04-agent-backend/deployment.yaml`.
 
 ### Warm Pool Size
 
-Edit `03-sandbox/warm-pool.yaml`:
+Edit `02-sandbox/warm-pool.yaml`:
 
 ```yaml
 spec:
@@ -119,28 +131,23 @@ spec:
 
 ### Sandbox Resources
 
-Edit `03-sandbox/sandbox-template.yaml` to adjust CPU, memory, installed packages, or the container image.
+Edit `02-sandbox/sandbox-template.yaml` to adjust CPU, memory, installed packages, or the container image.
 
 ## Usage
 
-1. Open the URL printed at the end of `deploy.sh` (or run `oc get route open-webui -n llm-sandbox-demo`)
-2. Select the **code-llm** model
-3. Try prompts like:
+1. Open the URL printed at the end of `deploy.sh` (or run `oc get route chat-ui -n llm-sandbox-demo`)
+2. Try prompts like:
    - "Write a Python script that calculates the first 20 Fibonacci numbers"
    - "Create a bash script that shows system information"
    - "Write a Python program that generates a random maze and solves it"
-   - "Run this code: `print(sum(range(1, 101)))`"
-
-The assistant will generate the code, execute it in a sandbox, and show you the results.
+3. Click the **Run** button on any code block to execute it in a sandbox
+4. View stdout/stderr output directly below the code block
 
 ## Troubleshooting
 
 ```bash
 # Check all pods
 oc get pods -n llm-sandbox-demo
-
-# Check model server logs
-oc logs -n llm-sandbox-demo -l serving.kserve.io/inferenceservice=code-llm
 
 # Check agent backend logs
 oc logs -n llm-sandbox-demo -l app=agent-backend
@@ -149,6 +156,9 @@ oc logs -n llm-sandbox-demo -l app=agent-backend
 oc get sandboxwarmpools -n llm-sandbox-demo
 oc get sandboxes -n llm-sandbox-demo
 
-# Check Open WebUI logs
-oc logs -n llm-sandbox-demo -l app=open-webui
+# Check chat UI logs
+oc logs -n llm-sandbox-demo -l app=chat-ui
+
+# Verify GCP credentials secret exists
+oc get secret gcp-credentials -n llm-sandbox-demo
 ```

@@ -59,6 +59,10 @@ spec:
         env:
         - name: OPENAI_API_BASE_URL
           value: "http://agent-backend.llm-sandbox-demo.svc.cluster.local:8000/v1"
+        - name: ENABLE_CODE_EXECUTION
+          value: "false"
+        - name: ENABLE_CODE_INTERPRETER
+          value: "false"
         tty: true
         securityContext:
           runAsUser: 0

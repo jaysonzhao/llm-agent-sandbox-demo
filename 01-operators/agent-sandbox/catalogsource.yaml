@@ -1,0 +1,12 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: CatalogSource
+metadata:
+  name:  agent-sandbox-operator-catalog
+  namespace: openshift-marketplace
+spec:
+  displayName: Agent Sandbox Catalog
+  sourceType: grpc
+  image: "quay.io/redhat-user-workloads/ose-osc-tenant/agent-sandbox-test-fbc@sha256:44b54f7bf1e518811193354eee1decbae5c951b4e50b7073c6cce55567e104dc"
+  updateStrategy:
+    registryPoll:
+        interval: 5m
