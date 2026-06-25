@@ -25,28 +25,6 @@ function wait_for_deployment() {
     return 1
 }
 
-function wait_for_catalogsource() {
-    local name=$1
-    local namespace=$2
-    local timeout=300
-    local interval=10
-    local elapsed=0
-    local state=""
-
-    while [ $elapsed -lt $timeout ]; do
-        state=$(oc get catalogsource -n "$namespace" "$name" -o jsonpath='{.status.connectionState.lastObservedState}' 2>/dev/null || echo "")
-        if [ "$state" == "READY" ]; then
-            echo "CatalogSource $name is ready"
-            return 0
-        fi
-        echo "CatalogSource $name is not yet ready (state: ${state:-unknown}), waiting another $interval seconds"
-        sleep $interval
-        elapsed=$((elapsed + interval))
-    done
-    echo "CatalogSource $name is not ready after $timeout seconds"
-    return 1
-}
-
 echo "################################################"
 echo "Starting the script. Many of the following commands"
 echo "will periodically check on OCP for operations to"
@@ -55,16 +33,6 @@ echo "If this scripts completes successfully, you will"
 echo "see a final message confirming installation went"
 echo "well."
 echo "################################################"
-
-echo ""
-echo "############################ Configure image mirrors ########################"
-oc apply -f "$SCRIPT_DIR/image-mirror-set.yaml"
-
-echo "############################ Install catalog ########################"
-oc apply -f "$SCRIPT_DIR/catalogsource.yaml"
-
-echo "############################ Wait for catalog ########################"
-wait_for_catalogsource agent-sandbox-operator-catalog openshift-marketplace || exit 1
 
 echo "############################ Install Agent Sandbox Operator ########################"
 oc apply -f-<<EOF
@@ -89,7 +57,7 @@ spec:
   channel: preview-0.9
   installPlanApproval: Automatic
   name: agent-sandbox-operator
-  source: agent-sandbox-operator-catalog
+  source: redhat-operators
   sourceNamespace: openshift-marketplace
 EOF
 

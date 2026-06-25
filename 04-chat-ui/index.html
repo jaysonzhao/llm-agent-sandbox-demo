@@ -203,7 +203,7 @@ header .status {
 }
 
 .code-output {
-  border-top: 1px solid #383850;
+  margin-top: 10px;
   padding: 14px 16px;
   font-family: "Fira Code", "JetBrains Mono", Menlo, Monaco, monospace;
   font-size: 13px;
@@ -214,10 +214,12 @@ header .status {
   overflow-y: auto;
   color: #d4d4d4;
   background: #141422;
+  border-radius: 12px;
+  border: 1px solid #2b2b3d;
 }
 
-.code-output.success { background: #0f1f15; }
-.code-output.error { background: #1f0f0f; }
+.code-output.success { background: #0f1f15; border-color: rgba(22, 163, 74, 0.3); }
+.code-output.error { background: #1f0f0f; border-color: rgba(220, 38, 38, 0.3); }
 
 .code-output .output-header {
   font-size: 11px;
@@ -569,14 +571,14 @@ async function runCode(btn, language) {
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner" style="width:12px;height:12px;border-width:2px;display:inline-block;vertical-align:middle;margin-right:4px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:spin 0.8s linear infinite;"></span>Running...';
 
-  let existing = block.querySelector('.code-output');
-  if (existing) existing.remove();
+  let existing = block.nextElementSibling;
+  if (existing && existing.classList.contains('code-output')) existing.remove();
 
   const outputDiv = document.createElement('div');
   outputDiv.className = 'code-output';
   outputDiv.innerHTML = '<span class="spinner"></span> Running in sandbox...';
-  block.appendChild(outputDiv);
-  scrollToBottom();
+  block.insertAdjacentElement('afterend', outputDiv);
+  outputDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
   try {
     const resp = await fetch('/v1/sandbox/execute', {
@@ -610,7 +612,7 @@ async function runCode(btn, language) {
   } finally {
     btn.disabled = false;
     btn.innerHTML = '&#9654; Run';
-    scrollToBottom();
+    outputDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 }
 
