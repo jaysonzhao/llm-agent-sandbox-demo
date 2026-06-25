@@ -1,0 +1,11 @@
+apiVersion: extensions.agents.x-k8s.io/v1beta1
+kind: SandboxWarmPool
+metadata:
+  name: code-sandbox-pool-runc-sa
+  namespace: llm-sandbox-demo
+spec:
+  replicas: 2
+  sandboxTemplateRef:
+    name: code-execution-template-runc-sa
+  updateStrategy:
+    type: OnReplenish
