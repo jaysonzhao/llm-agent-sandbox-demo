@@ -94,21 +94,21 @@ oc apply -f 02-sandbox/sandbox-template.yaml
 oc apply -f 02-sandbox/warm-pool.yaml
 
 # 3. Agent Backend
-oc apply -f 03-agent-backend/deployment.yaml
+oc apply -f 04-agent-backend/deployment.yaml
 
 # 4. Chat UI
 oc create configmap chat-ui-files \
-  --from-file=index.html=04-chat-ui/index.html \
-  --from-file=nginx.conf=04-chat-ui/nginx.conf \
+  --from-file=index.html=05-chat-ui/index.html \
+  --from-file=nginx.conf=05-chat-ui/nginx.conf \
   -n llm-sandbox-demo --dry-run=client -o yaml | oc apply -f -
-oc apply -f 04-chat-ui/deployment.yaml
+oc apply -f 05-chat-ui/deployment.yaml
 ```
 
 ## Configuration
 
 ### Changing the Model
 
-Edit `03-agent-backend/deployment.yaml` and update the environment variables:
+Edit `04-agent-backend/deployment.yaml` and update the environment variables:
 
 ```yaml
 env:

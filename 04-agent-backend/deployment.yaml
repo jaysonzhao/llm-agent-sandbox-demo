@@ -63,6 +63,8 @@ spec:
               value: "claude-sonnet-4@20250514"
             - name: MAX_TOKENS
               value: "4096"
+            - name: WARMPOOL_NAME
+              value: "code-sandbox-pool"
             - name: GOOGLE_APPLICATION_CREDENTIALS
               value: "/etc/gcp/application_default_credentials.json"
           resources:

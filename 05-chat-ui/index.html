@@ -491,16 +491,15 @@ async function sendMessage(text) {
       throw new Error(`HTTP ${resp.status}: ${errText}`);
     }
 
-    thinkingEl.remove();
-
     const assistantDiv = document.createElement('div');
     assistantDiv.className = 'message assistant';
     const contentDiv = document.createElement('div');
     contentDiv.className = 'content';
     assistantDiv.appendChild(contentDiv);
-    messagesEl.appendChild(assistantDiv);
+    assistantDiv.style.display = 'none';
 
     let fullText = '';
+    let thinkingRemoved = false;
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
@@ -522,6 +521,12 @@ async function sendMessage(text) {
           const chunk = JSON.parse(data);
           const delta = chunk.choices?.[0]?.delta;
           if (delta?.content) {
+            if (!thinkingRemoved) {
+              thinkingEl.remove();
+              messagesEl.appendChild(assistantDiv);
+              assistantDiv.style.display = '';
+              thinkingRemoved = true;
+            }
             fullText += delta.content;
             contentDiv.innerHTML = marked.parse(fullText);
             scrollToBottom();
@@ -530,6 +535,9 @@ async function sendMessage(text) {
       }
     }
 
+    if (!thinkingRemoved) thinkingEl.remove();
+    if (!assistantDiv.parentNode) messagesEl.appendChild(assistantDiv);
+    assistantDiv.style.display = '';
     contentDiv.innerHTML = marked.parse(fullText);
     history.push({ role: 'assistant', content: fullText });
     statusEl.textContent = '';

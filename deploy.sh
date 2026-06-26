@@ -66,7 +66,7 @@ info "Sandbox warm pool resources applied."
 # ── Step 3: Deploy Agent Backend ──────────────────────────────────
 info "=== Step 3: Deploying Agent Backend ==="
 
-oc apply -f "$SCRIPT_DIR/03-agent-backend/deployment.yaml"
+oc apply -f "$SCRIPT_DIR/04-agent-backend/deployment.yaml"
 wait_for_resource deployment agent-backend "$NAMESPACE"
 
 # ── Step 4: Deploy Chat UI ────────────────────────────────────────
@@ -75,11 +75,11 @@ info "=== Step 4: Deploying Chat UI ==="
 oc create namespace "$WEBUI_NAMESPACE" --dry-run=client -o yaml | oc apply -f -
 
 oc create configmap chat-ui-files \
-    --from-file=index.html="$SCRIPT_DIR/04-chat-ui/index.html" \
-    --from-file=nginx.conf="$SCRIPT_DIR/04-chat-ui/nginx.conf" \
+    --from-file=index.html="$SCRIPT_DIR/05-chat-ui/index.html" \
+    --from-file=nginx.conf="$SCRIPT_DIR/05-chat-ui/nginx.conf" \
     -n "$WEBUI_NAMESPACE" --dry-run=client -o yaml | oc apply -f -
 
-oc apply -f "$SCRIPT_DIR/04-chat-ui/deployment.yaml"
+oc apply -f "$SCRIPT_DIR/05-chat-ui/deployment.yaml"
 wait_for_resource deployment chat-ui "$WEBUI_NAMESPACE"
 
 # ── Step 5: Wait for Warm Pool ────────────────────────────────────

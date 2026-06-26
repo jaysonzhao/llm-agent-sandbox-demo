@@ -9,7 +9,7 @@ import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from sandbox_executor import create_client, execute_code
+from sandbox_executor import create_client, execute_code, verify_warmpool
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -40,6 +40,7 @@ _token_expiry = 0
 @app.on_event("startup")
 async def startup():
     global sandbox_client
+    verify_warmpool()
     try:
         sandbox_client = create_client()
         logger.info("Sandbox client initialized")
@@ -256,6 +257,111 @@ async def call_llm(messages: list, tools: list = None) -> dict:
     raise Exception(f"Vertex AI API failed after {max_retries} retries")
 
 
+def _sse_chunk(chat_id, model, delta, finish_reason):
+    return "data: {}\n\n".format(json.dumps({
+        "id": chat_id,
+        "object": "chat.completion.chunk",
+        "created": int(time.time()),
+        "model": model,
+        "choices": [{"index": 0, "delta": delta, "finish_reason": finish_reason}],
+    }))
+
+
+async def _stream_from_vertex(messages, tools=None, original_body=None):
+    chat_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+    model = (original_body or {}).get("model", MODEL_NAME)
+
+    yield _sse_chunk(chat_id, model, {"role": "assistant"}, None)
+
+    system, anthropic_messages = _openai_messages_to_anthropic(messages)
+    token = _refresh_access_token()
+
+    url = (
+        f"https://{VERTEX_REGION}-aiplatform.googleapis.com/v1/"
+        f"projects/{VERTEX_PROJECT}/locations/{VERTEX_REGION}/"
+        f"publishers/anthropic/models/{MODEL_NAME}:rawPredict"
+    )
+
+    body = {
+        "anthropic_version": "vertex-2023-10-16",
+        "stream": True,
+        "system": system,
+        "messages": anthropic_messages,
+        "max_tokens": MAX_TOKENS,
+        "temperature": 0.1,
+    }
+    if tools:
+        body["tools"] = tools
+        body["tool_choice"] = {"type": "auto"}
+
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=30.0)) as client:
+            async with client.stream(
+                "POST", url, json=body,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+            ) as resp:
+                if resp.status_code in (429, 503, 529):
+                    yield _sse_chunk(chat_id, model,
+                        {"content": f"Error: Vertex AI returned {resp.status_code}. Please try again."}, None)
+                    yield _sse_chunk(chat_id, model, {}, "stop")
+                    yield "data: [DONE]\n\n"
+                    return
+                resp.raise_for_status()
+
+                event_type = None
+                finish_reason = "stop"
+                tool_index = -1
+
+                async for line in resp.aiter_lines():
+                    if not line:
+                        continue
+                    if line.startswith("event: "):
+                        event_type = line[7:].strip()
+                    elif line.startswith("data: "):
+                        data = json.loads(line[6:])
+
+                        if event_type == "content_block_start":
+                            block = data.get("content_block", {})
+                            if block.get("type") == "tool_use":
+                                tool_index += 1
+                                yield _sse_chunk(chat_id, model, {
+                                    "tool_calls": [{
+                                        "index": tool_index,
+                                        "id": block["id"],
+                                        "type": "function",
+                                        "function": {"name": block["name"], "arguments": ""},
+                                    }]
+                                }, None)
+
+                        elif event_type == "content_block_delta":
+                            delta = data.get("delta", {})
+                            if delta.get("type") == "text_delta":
+                                yield _sse_chunk(chat_id, model, {"content": delta["text"]}, None)
+                            elif delta.get("type") == "input_json_delta":
+                                yield _sse_chunk(chat_id, model, {
+                                    "tool_calls": [{
+                                        "index": tool_index,
+                                        "function": {"arguments": delta["partial_json"]},
+                                    }]
+                                }, None)
+
+                        elif event_type == "message_delta":
+                            stop = data.get("delta", {}).get("stop_reason", "end_turn")
+                            finish_reason = "tool_calls" if stop == "tool_use" else "stop"
+
+                yield _sse_chunk(chat_id, model, {}, finish_reason)
+                yield "data: [DONE]\n\n"
+
+    except Exception as e:
+        logger.exception("Streaming from Vertex AI failed")
+        yield _sse_chunk(chat_id, model, {"content": f"\n\nError: {e}"}, None)
+        yield _sse_chunk(chat_id, model, {}, "stop")
+        yield "data: [DONE]\n\n"
+
+
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request):
     body = await request.json()
@@ -269,6 +375,12 @@ async def chat_completions(request: Request):
     openai_tools = body.get("tools", [])
     anthropic_tools = _openai_tools_to_anthropic(openai_tools) if openai_tools else []
 
+    if stream:
+        return StreamingResponse(
+            _stream_from_vertex(messages, anthropic_tools or None, body),
+            media_type="text/event-stream",
+        )
+
     try:
         result = await call_llm(messages, anthropic_tools or None)
         choice = result["choices"][0]
@@ -281,100 +393,25 @@ async def chat_completions(request: Request):
             msg.get("content", "") or "",
         )
 
-        if stream:
-            return StreamingResponse(
-                stream_response(msg, finish_reason, body),
-                media_type="text/event-stream",
-            )
-        return JSONResponse(format_response(msg, finish_reason, result.get("usage", {}), body))
+        return JSONResponse({
+            "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",
+            "object": "chat.completion",
+            "created": int(time.time()),
+            "model": body.get("model", MODEL_NAME),
+            "choices": [{"index": 0, "message": msg, "finish_reason": finish_reason}],
+            "usage": result.get("usage", {}),
+        })
 
     except Exception as e:
         logger.exception("Chat completion failed")
-        error_msg = f"Error: {e}"
-        if stream:
-            return StreamingResponse(
-                stream_response({"role": "assistant", "content": error_msg}, "stop", body),
-                media_type="text/event-stream",
-            )
-        return JSONResponse(format_response(
-            {"role": "assistant", "content": error_msg}, "stop", {}, body))
-
-
-def format_response(message: dict, finish_reason: str, usage: dict, original_body: dict) -> dict:
-    return {
-        "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",
-        "object": "chat.completion",
-        "created": int(time.time()),
-        "model": original_body.get("model", MODEL_NAME),
-        "choices": [{"index": 0, "message": message, "finish_reason": finish_reason}],
-        "usage": usage or {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
-    }
-
-
-async def stream_response(message: dict, finish_reason: str, original_body: dict):
-    chat_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
-    model = original_body.get("model", MODEL_NAME)
-    content = message.get("content") or ""
-    tool_calls = message.get("tool_calls") or []
-
-    chunk_start = {
-        "id": chat_id,
-        "object": "chat.completion.chunk",
-        "created": int(time.time()),
-        "model": model,
-        "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
-    }
-    yield f"data: {json.dumps(chunk_start)}\n\n"
-
-    if content:
-        chunk_size = 20
-        for i in range(0, len(content), chunk_size):
-            chunk = {
-                "id": chat_id,
-                "object": "chat.completion.chunk",
-                "created": int(time.time()),
-                "model": model,
-                "choices": [{
-                    "index": 0,
-                    "delta": {"content": content[i:i + chunk_size]},
-                    "finish_reason": None,
-                }],
-            }
-            yield f"data: {json.dumps(chunk)}\n\n"
-
-    for i, tc in enumerate(tool_calls):
-        tc_chunk = {
-            "id": chat_id,
-            "object": "chat.completion.chunk",
+        return JSONResponse({
+            "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",
+            "object": "chat.completion",
             "created": int(time.time()),
-            "model": model,
-            "choices": [{
-                "index": 0,
-                "delta": {
-                    "tool_calls": [{
-                        "index": i,
-                        "id": tc["id"],
-                        "type": "function",
-                        "function": {
-                            "name": tc["function"]["name"],
-                            "arguments": tc["function"]["arguments"],
-                        },
-                    }]
-                },
-                "finish_reason": None,
-            }],
-        }
-        yield f"data: {json.dumps(tc_chunk)}\n\n"
-
-    chunk_end = {
-        "id": chat_id,
-        "object": "chat.completion.chunk",
-        "created": int(time.time()),
-        "model": model,
-        "choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason}],
-    }
-    yield f"data: {json.dumps(chunk_end)}\n\n"
-    yield "data: [DONE]\n\n"
+            "model": body.get("model", MODEL_NAME),
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": f"Error: {e}"}, "finish_reason": "stop"}],
+            "usage": {},
+        })
 
 
 @app.post("/v1/sandbox/execute")
