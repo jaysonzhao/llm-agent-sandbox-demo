@@ -51,14 +51,14 @@ spec:
       serviceAccountName: agent-backend
       containers:
         - name: agent-backend
-          image: quay.io/haotech/llmdemo:v1
+          image: quay.io/haotech/llmdemo:v2
           ports:
             - containerPort: 8000
           env:
             - name: INFERENCE_URL
               value: "https://maas-rhdp.apps.maas.redhatworkshops.io/v1/chat/completions"
             - name: API_KEY
-              value: "sk-REZZvNvi8BjkBjUADzmdOA"
+              value: "sk-xxxxxxxxxxxxxxxxxxxx"
             - name: MODEL_NAME
               value: "gpt-oss-120b"
             - name: MAX_TOKENS
