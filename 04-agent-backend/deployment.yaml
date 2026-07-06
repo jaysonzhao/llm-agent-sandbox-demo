@@ -55,18 +55,16 @@ spec:
           ports:
             - containerPort: 8000
           env:
-            - name: VERTEX_PROJECT
-              value: "itpc-gcp-core-pe-eng-claude"
-            - name: VERTEX_REGION
-              value: "us-east5"
+            - name: INFERENCE_URL
+              value: "https://maas-rhdp.apps.maas.redhatworkshops.io/v1/chat/completions"
+            - name: API_KEY
+              value: "sk-REZZvNvi8BjkBjUADzmdOA"
             - name: MODEL_NAME
-              value: "claude-sonnet-4@20250514"
+              value: "gpt-oss-120b"
             - name: MAX_TOKENS
               value: "4096"
             - name: WARMPOOL_NAME
               value: "code-sandbox-pool"
-            - name: GOOGLE_APPLICATION_CREDENTIALS
-              value: "/etc/gcp/application_default_credentials.json"
           resources:
             requests:
               cpu: 500m
@@ -74,10 +72,6 @@ spec:
             limits:
               cpu: "2"
               memory: 1Gi
-          volumeMounts:
-            - name: gcp-creds
-              mountPath: /etc/gcp
-              readOnly: true
           livenessProbe:
             httpGet:
               path: /health
@@ -93,10 +87,6 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 10
             timeoutSeconds: 10
-      volumes:
-        - name: gcp-creds
-          secret:
-            secretName: gcp-credentials
 ---
 apiVersion: v1
 kind: Service
