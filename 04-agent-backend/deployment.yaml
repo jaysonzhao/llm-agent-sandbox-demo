@@ -51,7 +51,7 @@ spec:
       serviceAccountName: agent-backend
       containers:
         - name: agent-backend
-          image: quay.io/eesposit/agent-backend:latest
+          image: quay.io/haotech/llmdemo:v1
           ports:
             - containerPort: 8000
           env:
