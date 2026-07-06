@@ -18,7 +18,7 @@ app = FastAPI(title="LLM Sandbox Agent")
 
 # Inference endpoint configuration
 INFERENCE_URL = os.environ.get("INFERENCE_URL", "https://maas-rhdp.apps.maas.redhatworkshops.io/v1/chat/completions")
-API_KEY = os.environ.get("API_KEY", "sk-REZZvNvi8BjkBjUADzmdOA")
+API_KEY = os.environ.get("API_KEY", "sk-xxxxxxxxxxxx")
 MODEL_NAME = os.environ.get("MODEL_NAME", "gpt-oss-120b")
 MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "4096"))
 
