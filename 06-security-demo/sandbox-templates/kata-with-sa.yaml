@@ -14,8 +14,9 @@ spec:
         demo: security
     spec:
       serviceAccountName: sandbox-demo-sa
+      dnsPolicy: ClusterFirst
       automountServiceAccountToken: true
-      runtimeClassName: kata-remote
+      runtimeClassName: kata
       containers:
       - image: quay.io/eesposit/python-runtime-sandbox:latest
         name: sandbox

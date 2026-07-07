@@ -15,6 +15,7 @@ spec:
     spec:
       serviceAccountName: sandbox-demo-sa
       automountServiceAccountToken: true
+      dnsPolicy: ClusterFirst
       containers:
       - image: quay.io/eesposit/python-runtime-sandbox:latest
         name: sandbox
